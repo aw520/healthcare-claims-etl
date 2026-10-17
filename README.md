@@ -1,33 +1,131 @@
-# healthcare-claims-etl
+# Healthcare Claims ETL
 
-Automated healthcare data pipeline using AWS, PySpark, and SQL.
+An AWS-based batch ingestion project for synthetic healthcare claims data, with planned PySpark transformations and SQL analytics. The currently implemented portion copies validated source batches from an upstream S3 bucket into the Bronze layer of a data lake. Later stages of the ETL architecture are not implemented yet.
 
-> **Project status:** Initial dataset exploration and AWS storage setup. The ETL pipeline, data quality checks, and analytics tables are planned but have not yet been implemented.
+## Project Status
+
+| Component | Status |
+| --- | --- |
+| Synthea source exploration | **Completed locally**: six CSVs profiled for candidate-key completeness and uniqueness, plus transaction references and types |
+| AWS S3 upstream and Bronze buckets | **Configured**: 18 original CSVs delivered under `incoming/batch_001/` |
+| AWS Lambda batch ingestion | **Implemented and tested**: manifest validation, copying to Bronze, completion marker, sequential duplicate skip |
+| AWS Glue / PySpark data quality and transformations | **Planned** |
+| Silver tables (Parquet / Apache Iceberg), Gold aggregates, Athena queries | **Planned** |
+| EventBridge trigger and Step Functions orchestration / retries | **Planned** |
+
+## Current Architecture
+
+```text
+Manual batch delivery to upstream Amazon S3
+  incoming/batch_001/
+    18 CSV files
+    ready.json                <- uploaded last; declares expected files
+           |
+           | Manual AWS Lambda Test invocation (currently)
+           v
+  AWS Lambda: healthcare-batch-ingestion
+    1. Read and parse ready.json
+    2. List actual CSV filenames
+    3. Fail on missing, extra, or duplicate-declared filenames
+    4. Check Bronze for an _INGESTED.json completion marker
+    5. If not already complete, copy 18 CSVs and ready.json
+    6. Write _INGESTED.json only after copies finish
+           |
+           v
+Data lake Amazon S3
+  bronze/batch_001/
+    18 CSV files
+    ready.json
+    _INGESTED.json             <- written by Lambda after success
+
+Planned: EventBridge -> Step Functions -> ingestion Lambda -> AWS Glue -> Silver / Gold -> Athena
+```
+
+`ready.json` is an application-defined delivery manifest, not an AWS-generated file. It signals that the upstream batch is ready and lists the expected CSVs. `_INGESTED.json` is a separate completion marker written by the Lambda after Bronze copying succeeds.
+
+### Implemented Ingestion Behavior
+
+The code lives in [`ingestion/lambda_function.py`](ingestion/lambda_function.py). The Lambda handler reads the manifest via `s3.get_object`, lists CSV objects via paginated `list_objects_v2`, and checks that the batch ID and exact filename sets match. Missing files, unexpected CSVs, invalid manifest filename lists, and duplicate entries cause validation errors before copying begins.
+
+Validated batches are copied using S3 server-side `copy_object` calls. The Lambda copies the manifest last and then creates `_INGESTED.json` with `put_object`. On a later **sequential** invocation with the same valid batch, the Lambda sees the completion marker and returns `already_ingested` without copying the files again.
+
+**Verified on AWS:** manual invocation for `batch_001` returned `status: ingested` with `file_count: 18`; the destination Bronze prefix was checked in S3. A subsequent invocation returned `status: already_ingested` with no file-copy log entries.
+
+**Current limits:** The Lambda validates manifest filenames, not CSV contents, checksums, schema types, or row-level quality. Batch copies are not transactional; a failed run can leave a partially copied prefix and would need another invocation to retry. Sequential duplicate skipping has been tested, but concurrent invocations, source immutability, and failure recovery have not been tested or guarded with a distributed lock. Event-triggered automation and workflow retries are not in place yet.
+
+## Run the Implemented Ingestion
+
+The function is deployed manually to AWS Lambda with the **Python 3.12** runtime and handler `lambda_function.lambda_handler` (the file is placed at the Lambda deployment root when using the inline editor). This project currently has no infrastructure-as-code or automated deployment pipeline.
+
+Configure these Lambda environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `UPSTREAM_BUCKET` | S3 bucket containing `incoming/<batch_id>/` |
+| `LAKE_BUCKET` | Data lake bucket receiving `bronze/<batch_id>/` |
+
+The Lambda execution role needs permission to list and read the upstream batch, list the Bronze prefix for completion-marker checks, and write objects to Bronze. Bucket names and account-specific settings are not hard-coded in the Python source.
+
+To invoke manually in the Lambda console, use a test event like:
+
+```json
+{
+  "batch_id": "batch_001"
+}
+```
+
+On first successful ingestion, the response contains `status: ingested`, `file_count: 18`, and `destination: bronze/batch_001/`. On a later invocation, `status: already_ingested` indicates the completion marker was found.
 
 ## Source Dataset
 
-This project uses the **1K Sample Synthetic Patient Records (CSV)** dataset from [Synthea](https://synthetichealth.github.io/synthea/), an open-source synthetic healthcare data generator.
+The data comes from **Synthea's 1K Sample Synthetic Patient Records (CSV)** ([Synthea project](https://synthetichealth.github.io/synthea/)). All **18 source CSVs** for the sample batch have been uploaded to the upstream S3 bucket and copied into Bronze. The raw CSV files are deliberately kept outside this Git repository.
 
-The original CSV files are kept outside this repository. An upstream Amazon S3 bucket will simulate data deliveries from an external healthcare data provider.
+Initial deeper exploration focuses on six related files:
 
-### Selected Source Files
+| File | Observed rows | Candidate record grain / role |
+| --- | ---: | --- |
+| `claims.csv` | 117,889 | Claim identifiers, service details, statuses, patient/provider references |
+| `claims_transactions.csv` | 711,238 | Individual transactions linked to claims; charges, payments, transfers |
+| `patients.csv` | 1,163 | Patient-level demographics |
+| `providers.csv` | 5,056 | Provider-level attributes and organizations |
+| `encounters.csv` | 61,459 | Encounter-level visits and associated costs |
+| `payers.csv` | 10 | Insurance payer records |
 
-The initial scope focuses on six related CSV files:
+## Exploratory Source Profiling
 
-| File | Record grain | Main purpose |
-| --- | --- | --- |
-| `claims.csv` | One row per claim (to verify) | Claim identifiers, patient/provider references, service dates, diagnoses, and claim status |
-| `claims_transactions.csv` | One row per claim transaction (to verify) | Charges, payments, adjustments, transfers, and outstanding balances |
-| `patients.csv` | One row per patient | Patient attributes and demographic information |
-| `providers.csv` | One row per provider | Provider names, specialties, organizations, and locations |
-| `encounters.csv` | One row per encounter | Visit dates, provider/payer references, and encounter costs |
-| `payers.csv` | One row per payer | Insurance payer information and source-level coverage statistics |
+The local script [`quality/profile_sources.py`](quality/profile_sources.py) uses Python's standard `csv` module to inspect six source files. It checks candidate identifier blanks/duplicates, validates claim references in transactions, and counts transaction types. These are **exploratory, local checks**, not automated production data quality gates in the Lambda or Spark.
 
-The record grains and expected identifiers will be confirmed by profiling the downloaded data.
+Observed results on the downloaded Synthea sample:
+
+- All six selected files had **0 missing/blank candidate IDs** and **0 duplicate candidate IDs**.
+- `claims_transactions.CLAIMID` had **0 missing values** and **0 orphan references** against `claims.Id`.
+- Transaction `TYPE` counts: `PAYMENT` 252,335; `CHARGE` 218,721; `TRANSFEROUT` 120,091; `TRANSFERIN` 120,091.
+
+The presence of a transaction `AMOUNT` does **not** imply that value represents a payment; future financial metrics must respect transaction types and the meanings of the source amount columns.
+
+### Running Local Profiling
+
+Place the downloaded CSVs in a sibling `csv/` directory next to the repository (not inside it):
+
+```text
+HealthcareClaimsETL/
+  csv/
+    claims.csv
+    claims_transactions.csv
+    ...
+  healthcare-claims-etl/
+    quality/profile_sources.py
+```
+
+Run from the repository root:
+
+```bash
+python3 quality/profile_sources.py
+```
 
 ## Source Schema Reference
 
-The columns below come from the **actual CSV headers** of the selected Synthea sample. This is a focused reference, not a complete list of every source column. Data types, nullability, uniqueness, and referential integrity have **not yet been validated**.
+The columns below come from the **actual CSV headers** of the selected Synthea sample. This is a focused reference, not a complete list of every source column. Exploratory profiling has checked candidate-key uniqueness in six files and the `claims_transactions.CLAIMID` relationship. Full schema typing, nullability validation, and remaining foreign-key checks are still planned.
 
 ### 1. `claims.csv`
 
@@ -61,7 +159,7 @@ The columns below come from the **actual CSV headers** of the selected Synthea s
 | `PROCEDURECODE`, `UNITS`, `UNITAMOUNT` | Procedure and unit-level details |
 | `PROVIDERID`, `PATIENTINSURANCEID` | Provider and insurance references |
 
-**Important:** Do not assume that `AMOUNT` means "paid amount." Transaction types and amount columns must be profiled before defining financial metrics.
+**Important:** Do not assume that `AMOUNT` means "paid amount." Transaction types have been counted, but amount-field semantics must be established before defining financial metrics.
 
 ### 3. `patients.csv`
 
@@ -114,7 +212,7 @@ Other columns include names, addresses, and synthetic identity fields (for examp
 
 ## Expected Data Relationships
 
-These are **candidate join paths**, inferred from column names. We will check actual key matches before treating them as established relationships.
+These are join candidates inferred from source headers. Only `claims.Id` → `claims_transactions.CLAIMID` has been checked for missing and orphan references in local profiling; the other paths remain unverified.
 
 | Parent key | Child key | Expected relationship |
 | --- | --- | --- |
@@ -129,15 +227,12 @@ These are **candidate join paths**, inferred from column names. We will check ac
 
 For claim-level calculations, transaction records should generally be **aggregated by `CLAIMID` before joining** to the claims table; otherwise a one-to-many join could multiply claim-level values.
 
-## Initial Data Profiling Checklist
+## Next Steps (Not Yet Implemented)
 
-Before implementing transformations, inspect and record:
+- [ ] Build an AWS Glue PySpark job to read the Bronze CSVs, apply typed schemas and row-level quality checks, and define treatment of invalid records.
+- [ ] Produce curated Silver datasets, with Parquet / Apache Iceberg tables where appropriate.
+- [ ] Define claim-transaction aggregation semantics and create Gold-level metrics / Athena SQL queries.
+- [ ] Configure EventBridge and Step Functions for automatic batch triggering, orchestration, and retries.
+- [ ] Improve ingestion reliability with source-file integrity checks, batch immutability guarantees, and explicit handling of concurrency and partial failures.
 
-- [ ] Row counts and candidate primary-key uniqueness for all six files
-- [ ] Null and blank values in required identifiers
-- [ ] Candidate foreign-key match rates and orphan transaction records
-- [ ] Date and numeric field formats, including invalid values
-- [ ] Actual `claims_transactions.TYPE` values and the meaning of the different amount columns
-- [ ] Join cardinality and potential duplication when combining tables
-
-This README will be expanded incrementally as the pipeline is implemented and validated.
+The documentation is updated as each stage is implemented and verified; planned capabilities are not described as completed.
