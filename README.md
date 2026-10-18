@@ -97,7 +97,7 @@ The Silver claims transformation retains source string columns and adds `service
 | **`batch_001` — baseline** | 18 source CSVs; 117,889 claims | Manually verified parameterized Glue run and **audit PASS**. Counts match, zero missing/unexpected/duplicate IDs, zero NULL typed values; original Glue DQ rules passed |
 | **`batch_002` — successful event-driven delivery** | Valid changes to **2 amounts and 1 service date**, same claim IDs | **End-to-end succeeded:** EventBridge → Step Functions → Ingestion → Glue → Audit. Ingestion copied 18 files; Glue `SUCCEEDED` (101 s, 2 G.1X workers); audit **PASS**, 117,889 source and target rows, zero missing/unexpected/duplicate IDs or NULL typed values; catalog partition newly `registered` |
 | **`batch_002` — Athena change check** | Compare Silver partitions for batches 001 and 002 on claim ID | 117,889 common claim IDs; **2 changed amounts, 1 changed date** — matching controlled test edits |
-| **`batch_003` — negative DQ test** | Make the second claim use the first claim's ID, preserving file count | Ingestion reached Glue; Glue job **FAILED** with `AssertionError: The job failed due to failing DQ rules`. Step Functions did not proceed to a successful audit. **Specific per-rule failure evidence still needs to be inspected/published**; the job error alone does not identify `IsUnique` |
+| **`batch_003` — negative DQ test** | Make the second claim use the first claim's ID, preserving file count | Ingestion reached Glue; Glue job **FAILED** with `AssertionError: The job failed due to failing DQ rules`. Step Functions did not proceed to a successful audit. **Glue Data Quality results confirmed** `IsComplete "claim_id"` **passed** and `IsUnique "claim_id"` **failed**; the DQ assertion stopped the job |
 
 **Important distinction:** A Step Functions Lambda task turning green means the invocation succeeded; a successful audit must also return business-level `status: PASS`. That was confirmed for `batch_002`.
 
@@ -109,7 +109,7 @@ The manual Athena comparison confirms that intended changes reached Silver. It i
 - **Row-level / dataset-level (Glue):** evaluate `IsComplete "claim_id"` and `IsUnique "claim_id"` before the Silver target.
 - **Post-transform (audit):** reconcile Bronze versus Silver counts and claim ID sets; reject missing/duplicate IDs or NULL typed values.
 
-For detailed rule evidence, inspect **AWS Glue Studio → job → Data quality → job run → DQ node / rule results**. The `batch_003` exception proves a DQ assertion failed, but its error text alone does not say which rule failed.
+The `batch_003` rule-level evidence was confirmed in **AWS Glue Studio → job → Data quality → Rules**: `IsComplete "claim_id"` **Rule passed**, `IsUnique "claim_id"` **Rule failed**. The initial job exception was generic; the structured rule evaluation provided the specific cause.
 
 ## Repository Layout
 
@@ -154,7 +154,7 @@ This is a learning / portfolio MVP, **not** a production-ready healthcare data p
 
 - **Batch semantics:** `batch_002` contains modified versions of some `batch_001` claims. Both partitions coexist; the project does **not** implement claim-level upserts, CDC, latest-version views, or deduplication *across* batches.
 - **Idempotency and recovery:** an ingestion completion marker avoids ordinary sequential duplicate ingestion; the Glue output-exists guard avoids straightforward overwrites. Neither guarantees concurrent exactly-once execution, rollback, or safe recovery after partially written output.
-- **Quality visibility:** Glue blocks a DQ failure, but rule-level failure persistence, quarantine, and structured alerting need improvement.
+- **Quality visibility:** Glue Studio exposes per-rule DQ results (verified for `batch_003`), but a durable custom failure report, quarantine, and structured alerting need improvement.
 - **Audit scaling:** the current Lambda holds claim ID sets in memory and enforces a 250,000-row limit. It does not compare every transformed amount/date to its source.
 - **Publication:** the catalog partition is registered before final audit PASS. No atomic publish/promote step or downstream visibility gate exists.
 - **Security and deployment:** only synthetic data is used; no real patient records or PHI. Manual Console configuration is not yet managed through IaC or CI/CD.
@@ -179,7 +179,7 @@ This is a learning / portfolio MVP, **not** a production-ready healthcare data p
 
 ### P3 — Reliability, observability, and operational hardening
 
-- [ ] Persist **per-rule Glue Data Quality outcomes** and failing-row evidence; add quarantine/rejected-record paths and meaningful error reports.
+- [ ] Export/persist **per-rule Glue Data Quality outcomes** and failing-row evidence outside the Glue UI; add quarantine/rejected-record paths and meaningful error reports.
 - [ ] Add Step Functions retries/backoff where safe, failure notifications, EventBridge DLQ, monitoring dashboards, and resource-level metrics.
 - [ ] Implement concurrency controls, safer idempotency, partial-write cleanup, and an audit-gated publish/promotion flow.
 - [ ] Replace in-memory Lambda ID comparison with scalable Athena/Spark SQL reconciliation for larger datasets.
