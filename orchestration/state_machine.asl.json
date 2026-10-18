@@ -1,0 +1,49 @@
+{
+  "Comment": "Healthcare claims batch ETL pipeline",
+  "StartAt": "ExtractBatchId",
+  "States": {
+    "ExtractBatchId": {
+      "Type": "Pass",
+      "Parameters": {
+        "batch_id.$": "States.ArrayGetItem(States.StringSplit($.detail.object.key, '/'), 1)"
+      },
+      "Next": "IngestBronze"
+    },
+    "IngestBronze": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:146699354444:function:healthcare-batch-ingestion",
+        "Payload": {
+          "batch_id.$": "$.batch_id"
+        }
+      },
+      "ResultPath": "$.ingestion",
+      "Next": "TransformSilver"
+    },
+    "TransformSilver": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "healthcare-claims-bronze-to-silver-param",
+        "Arguments": {
+          "--batch_id.$": "$.batch_id"
+        }
+      },
+      "ResultPath": "$.glue",
+      "Next": "AuditBatch"
+    },
+    "AuditBatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:146699354444:function:healthcare-claims-audit",
+        "Payload": {
+          "batch_id.$": "$.batch_id"
+        }
+      },
+      "ResultPath": "$.audit",
+      "End": true
+    }
+  }
+}
