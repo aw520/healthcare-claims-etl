@@ -13,7 +13,7 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",
       "Parameters": {
-        "FunctionName": "arn:aws:lambda:us-east-1:146699354444:function:healthcare-batch-ingestion",
+        "FunctionName": "arn:aws:lambda:us-east-1:${AWS_ACCOUNT_ID}:function:healthcare-batch-ingestion",
         "Payload": {
           "batch_id.$": "$.batch_id"
         }
@@ -37,7 +37,7 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",
       "Parameters": {
-        "FunctionName": "arn:aws:lambda:us-east-1:146699354444:function:healthcare-claims-audit",
+        "FunctionName": "arn:aws:lambda:us-east-1:${AWS_ACCOUNT_ID}:function:healthcare-claims-audit",
         "Payload": {
           "batch_id.$": "$.batch_id"
         }
