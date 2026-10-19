@@ -191,6 +191,29 @@ This is a learning / portfolio MVP, **not** a production-ready healthcare data p
 The primary near-term objective was to validate a working **event-triggered Bronze-to-Silver pipeline with a positive audit and a controlled negative DQ test**. Those tests have now been exercised; broader data modeling, Gold analytics, IaC, and CI/CD remain future work.
 
 
+## Captured AWS Glue job settings (Console, October 2026)
+
+Active job: `healthcare-claims-bronze-to-silver-param`; the older, non-parameterized Glue job is an unused development prototype and can be removed independently after checking its exact name.
+
+| Setting | Observed value |
+| --- | --- |
+| Job type and version | Spark, AWS Glue 5.1 (Spark 3.5), Python 3 |
+| IAM role | `healthcare-glue-etl-role` |
+| Worker configuration | 2 × G.1X; auto scaling off |
+| Job bookmarks / retries / timeout / max concurrency | Disabled / 0 / 20 minutes / 1 |
+| Script | `s3://aws-glue-assets-146699354444-us-east-1/scripts/healthcare-claims-bronze-to-silver-param.py` |
+| Spark UI history | `s3://aws-glue-assets-146699354444-us-east-1/sparkHistoryLogs/` (enabled, standard) |
+| Temporary path | `s3://aws-glue-assets-146699354444-us-east-1/temporary/` |
+| Job metrics / observability / continuous CloudWatch logging | Enabled / enabled / enabled |
+| Job insights | Enabled |
+| Job run queueing / flex execution / lineage events | Disabled / disabled / disabled |
+| Glue Data Catalog as Hive metastore | Enabled |
+| Security configuration | None selected |
+| Job parameter seen in Console | `--conf` (Spark event log rolling; full value should be verified before redeployment) |
+| Resource tags | `Environment=dev`, `Project=healthcare-claims-etl` |
+
+The workflow passes `--batch_id` **at runtime** from Step Functions; it need not be present as a static job default argument. Settings above were transcribed from AWS Console screenshots and are not an IaC deployment. The Glue script content is version-controlled in `glue/claims_bronze_to_silver.py`; confirm deployed version before reproducing.
+
 ## Pausing / Tearing Down the AWS Demo (cost control)
 
 The pipeline was successfully tested and is not intended to run continuously. **No AWS resources are deleted by this repository.** The actions below are a manual checklist; verify each item in the actual AWS account and region before deleting anything. The repository preserves application logic, **not** a fully reproducible infrastructure deployment.
