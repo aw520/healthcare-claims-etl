@@ -1,4 +1,5 @@
 import sys
+import os
 from awsglue.transforms import *
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
@@ -24,7 +25,7 @@ batch_id = args["batch_id"]
 if not re.fullmatch(r"batch_[0-9]{3,}", batch_id):
     raise ValueError(f"Invalid batch_id: {batch_id}")
 
-bucket = "healthcare-lake-146699354444-us-east-1-an"
+bucket = os.environ["LAKE_BUCKET"]  # Set before running; replaces the original hardcoded account-specific bucket
 
 source_path = (
     f"s3://{bucket}/bronze/{batch_id}/claims.csv"
