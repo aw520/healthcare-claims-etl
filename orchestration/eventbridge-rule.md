@@ -9,8 +9,8 @@ Captured from AWS Console screenshots on 2026-10-19. This is a configuration sna
 - Description: Start healthcare claims ETL when a batch ready manifest arrives
 - Input to target: Matched event (entire EventBridge event)
 - Target: Step Functions state machine `healthcare-claims-pipeline`
-- Target ARN: `arn:aws:states:us-east-1:146699354444:stateMachine:healthcare-claims-pipeline`
-- EventBridge target execution role (Console): `Amazon_EventBridge_Invoke_Step_Functions_1273437584` (permissions/trust relationship **not** exported)
+- Target ARN: `arn:aws:states:us-east-1:<AWS_ACCOUNT_ID>:stateMachine:healthcare-claims-pipeline`
+- EventBridge target execution role (Console): `<EVENTBRIDGE_TARGET_ROLE>` (permissions/trust relationship **not** exported)
 - Retry policy (Console): 24h maximum age, 3 retry attempts
 - Dead-letter queue: None
 - Additional target parameters: None
@@ -23,7 +23,7 @@ Captured from AWS Console screenshots on 2026-10-19. This is a configuration sna
   "detail-type": ["Object Created"],
   "detail": {
     "bucket": {
-      "name": ["healthcare-upstream-146699354444-us-east-1-an"]
+      "name": ["<UPSTREAM_BUCKET>"]
     },
     "object": {
       "key": [{
