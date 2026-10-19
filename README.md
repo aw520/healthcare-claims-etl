@@ -118,6 +118,10 @@ healthcare-claims-etl/
 │   └── lambda_function.py          # Manifest validation and Bronze copying
 ├── audit/
 │   └── lambda_function.py          # Catalog registration, Athena reconciliation, report
+├── glue/
+│   └── claims_bronze_to_silver.py # Spark transformation and DQ rules
+├── orchestration/
+│   └── state_machine.asl.json   # Step Functions workflow definition
 ├── quality/
 │   └── profile_sources.py          # Local exploratory source profiling
 ├── tests/
@@ -126,7 +130,7 @@ healthcare-claims-etl/
 └── README.md
 ```
 
-**Still in AWS Console, not yet committed to this repo:** the **parameterized Glue Spark script**, **Step Functions ASL definition**, EventBridge configuration, and IAM / job / catalog infrastructure settings. Version-controlling these is a priority below.
+**Version-controlled pipeline logic:** the parameterized Glue Spark script (`glue/claims_bronze_to_silver.py`) and Step Functions ASL definition (`orchestration/state_machine.asl.json`) are committed alongside the Lambda code. **Still configured manually in AWS:** EventBridge event pattern/target, IAM roles/policies, Lambda environment settings, Glue job configuration, Athena DDL / Glue Catalog metadata, and S3 configuration. The committed ASL contains account-specific Lambda ARNs and must be adapted to redeploy.
 
 ### Recreate test inputs locally
 
@@ -162,7 +166,7 @@ This is a learning / portfolio MVP, **not** a production-ready healthcare data p
 
 ### P1 — Reproducibility and developer workflow
 
-- [ ] **Commit deployed logic:** export the parameterized Glue Spark script and Step Functions Amazon States Language (ASL) JSON to the repository.
+- [x] **Commit deployed logic:** parameterized Glue Spark script and Step Functions Amazon States Language (ASL) JSON are in the repository.
 - [ ] **Capture AWS configuration:** EventBridge rule/pattern, Glue job properties, Lambda runtime/environment variable names, IAM permission scopes, S3 layout, Athena / catalog table definitions.
 - [ ] **Infrastructure as Code:** define/manage existing AWS resources with **Terraform or AWS CDK**; carefully import/adopt manually created resources before applying changes.
 - [ ] **GitHub Actions CI/CD:** lint/test/package Python and deploy versioned Glue/Lambda/workflow assets; use GitHub **OIDC** to assume an AWS IAM deployment role instead of storing long-lived access keys.
@@ -185,3 +189,16 @@ This is a learning / portfolio MVP, **not** a production-ready healthcare data p
 - [ ] Improve IAM least privilege, object-tag handling, encryption/cost controls, and reproducible teardown.
 
 The primary near-term objective was to validate a working **event-triggered Bronze-to-Silver pipeline with a positive audit and a controlled negative DQ test**. Those tests have now been exercised; broader data modeling, Gold analytics, IaC, and CI/CD remain future work.
+
+
+## Pausing / Tearing Down the AWS Demo (cost control)
+
+The pipeline was successfully tested and is not intended to run continuously. **No AWS resources are deleted by this repository.** The actions below are a manual checklist; verify each item in the actual AWS account and region before deleting anything. The repository preserves application logic, **not** a fully reproducible infrastructure deployment.
+
+1. **Stop new executions:** disable EventBridge rule `healthcare-claims-on-batch-ready` and check whether any other S3 notifications, schedules, or triggers can start the workflow. Verify no running Step Functions executions or Glue job runs before teardown.
+2. **Export remaining configuration before deletion:** EventBridge event pattern and target/input transformation; IAM trust relationships and attached/inline policies for EventBridge, Step Functions, Glue, and both Lambdas; Lambda configuration/environment variable *names* (do **not** commit secrets); Glue job version, worker sizing, job arguments, script S3 location, and role; Athena table DDL / database, S3 locations, output configuration, and Glue Catalog partition setup; S3 bucket settings and permissions. Keep exports in version control only after redacting account-specific secrets and credentials.
+3. **Preserve test evidence:** README records baseline `batch_001`, event-driven `batch_002` PASS, and intentionally invalid `batch_003` Glue DQ failure. Download any logs, screenshots, audit JSON, or raw data that must be reproducible before removing their S3 or CloudWatch copies. Original synthetic CSVs and test inputs are not committed.
+4. **Review Billing / Cost Explorer by service and region:** prioritize ongoing charges from S3 object storage/version history, Athena results, CloudWatch logs, and any unrelated EC2/EBS, NAT gateways, VPC endpoints, load balancers, or other provisioned services actually present. Disabling the workflow does not remove stored data or these resources.
+5. **Remove resources selectively after backup:** for a temporary pause, leave idle Lambda functions, Glue job definitions, and Step Functions definitions in place, since compute is generally usage-based; clean up data/log storage after reviewing costs. For full teardown, remove pipeline-specific event rules/targets, state machine, Glue job, Lambdas, catalog entries, S3 objects/buckets and unused IAM roles only after verifying they are not shared with other projects. Review S3 versioning and delete markers separately.
+
+**Do not use an EC2 AMI as a backup of this serverless pipeline.** AMIs represent EC2 images, not Glue/Step Functions/Lambda/EventBridge settings, and their underlying EBS snapshots can incur storage charges. Docker images similarly preserve container files, not this AWS infrastructure, and registry storage may be billed. Source code + exported configuration + IaC (future) are the preferred recovery assets.
