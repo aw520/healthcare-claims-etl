@@ -201,9 +201,9 @@ Active job: `healthcare-claims-bronze-to-silver-param`; the older, non-parameter
 | IAM role | `healthcare-glue-etl-role` |
 | Worker configuration | 2 × G.1X; auto scaling off |
 | Job bookmarks / retries / timeout / max concurrency | Disabled / 0 / 20 minutes / 1 |
-| Script | `s3://aws-glue-assets-146699354444-us-east-1/scripts/healthcare-claims-bronze-to-silver-param.py` |
-| Spark UI history | `s3://aws-glue-assets-146699354444-us-east-1/sparkHistoryLogs/` (enabled, standard) |
-| Temporary path | `s3://aws-glue-assets-146699354444-us-east-1/temporary/` |
+| Script | `s3://<GLUE_ASSETS_BUCKET>/scripts/healthcare-claims-bronze-to-silver-param.py` |
+| Spark UI history | `s3://<GLUE_ASSETS_BUCKET>/sparkHistoryLogs/` (enabled, standard) |
+| Temporary path | `s3://<GLUE_ASSETS_BUCKET>/temporary/` |
 | Job metrics / observability / continuous CloudWatch logging | Enabled / enabled / enabled |
 | Job insights | Enabled |
 | Job run queueing / flex execution / lineage events | Disabled / disabled / disabled |
